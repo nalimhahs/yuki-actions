@@ -15,6 +15,8 @@ jobs:
           sudo apt-get update && sudo apt-get -y install ffmpeg nodejs
           npm i web3.storage axios
       - name: Download 
+        env:
+          RABBITMQ_URL: ${{ secrets.RABBITMQ_URL }}
         shell: python
         run: |
           import os
