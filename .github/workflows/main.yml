@@ -11,8 +11,7 @@ jobs:
       - name: Dependencies
         run: |
           pip3 install xdcc-dl pika psutil
-          curl -sL https://deb.nodesource.com/setup_16.x | sudo bash -
-          sudo apt-get update && sudo apt-get -y install ffmpeg nodejs
+          sudo apt-get -y install ffmpeg 
           npm i web3.storage axios
       - name: Download 
         env:
