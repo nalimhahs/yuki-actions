@@ -116,7 +116,7 @@ jobs:
         with:
           path: |
             ./pre
-          key: ${{ steps.download.outputs.hash }}-v1
+          key: ${{ steps.download.outputs.hash }}-v2
 
 
   check-matrix:
@@ -144,7 +144,7 @@ jobs:
         id: fetch-cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v1
+          key: ${{ needs.setup-matrix.outputs.hash }}-v2
 
       - name: Check Cache
         if: steps.fetch-cache.outputs.cache-hit == 'true'
@@ -193,7 +193,7 @@ jobs:
         name: Fetch video from cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v1
+          key: ${{ needs.setup-matrix.outputs.hash }}-v2
       
       - name: Transcode Segment
         run: |
@@ -219,7 +219,7 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v1-out-${{ matrix.segments }}
+          key: ${{ needs.setup-matrix.outputs.hash }}-v2-out-${{ matrix.segments }}
           
   reconstruct-video:
     runs-on: ubuntu-latest
@@ -254,9 +254,9 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v1-out-xxx
+          key: ${{ needs.setup-matrix.outputs.hash }}-v2-out-xxx
           restore-keys: |
-            ${{ needs.setup-matrix.outputs.hash }}-v1-out-
+            ${{ needs.setup-matrix.outputs.hash }}-v2-out-
       
       - name: Join Segments
         run: |
