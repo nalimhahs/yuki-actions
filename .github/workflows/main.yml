@@ -260,13 +260,14 @@ jobs:
       
       - name: Join Segments
         run: |
-          ls ./out > fl.txt 
-          cat fl.txt
-          ./ffmpeg/bin/ffmpeg -f concat -safe 0 -i fl.txt -c copy output.webm
+          for f in ./out/*.webm; do echo "file '$f'" > mylist.txt; done
+          cat mylist.txt
+          ./ffmpeg/bin/ffmpeg -f concat -safe 0 -i mylist.txt -c copy output.webm
+
           
       - name: Generate DASH Playlist
         run: |
-          VIDEO_IN=output.mkv
+          VIDEO_IN=output.webm
           V_SIZE_1=640x360
           V_SIZE_2=768x432
           V_SIZE_3=1280x720
