@@ -24,7 +24,6 @@ jobs:
           
       - name: Cache ffmpeg
         if: steps.fetch-ffmpeg.outputs.cache-hit != 'true'
-        shell: python
         run: |
           url=`
               curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
