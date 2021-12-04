@@ -93,7 +93,7 @@ jobs:
           echo "Duration: $DURATION"
           echo "Size: $SEGMENT_SIZE"
 
-          ./ffmpeg/bin/ffmpeg -i output.mkv \
+          ./ffmpeg/bin/ffmpeg -i output.mkv -map 0\
               -vcodec copy -f segment -segment_time $SEGMENT_SIZE \
               ./pre/pre_%02d.mkv
 
@@ -158,3 +158,153 @@ jobs:
           files = [f for f in listdir(path) if isfile(join(path, f))]
           segments = { 'segments': files }
           print(segments)
+          
+  transcode-video:
+    runs-on: ubuntu-latest
+    needs: setup-matrix
+    
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.setup-matrix.outputs.matrix)}}
+      
+    steps:
+      - uses: actions/cache@v2
+        name: Fetch ffmpeg
+        id: fetch-ffmpeg
+        with:
+          path: './ffmpeg'
+          key: 'ffmpeg'
+          
+      - name: Cache ffmpeg
+        if: steps.fetch-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          url=`
+              curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
+              | grep "linux64-gpl.tar.xz" \
+              | cut -d : -f 2,3 \
+              | cut -d , -f 2 \
+              | tr -d \" 
+          `
+          wget -O ffmpeg.tar.xz $url 
+          tar -xvf ffmpeg.tar.xz
+          mv ffmpeg-* ffmpeg
+      
+      - name: Transcode Segment
+        run: |
+          VIDEO_IN=./pre/${{ matrix.segment }}
+          VIDEO_OUT=./out/`echo "$VIDEO_IN" | sed -r "s/.+\/(.+)\..+/\1/"`.webm
+
+          mkdir ./out
+
+          ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -vf scale=1920x1080,subtitles=$VIDEO_IN -b:v 1800k \
+            -minrate 900k -maxrate 2610k -tile-columns 2 -g 240 -threads 8 \
+            -quality good -crf 31 -c:v libvpx-vp9 -c:a libopus \
+            -pix_fmt yuv420p10le \
+            -pass 1 -speed 4 $VIDEO_OUT && \
+          ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -vf scale=1920x1080 -b:v 1800k \
+            -minrate 900k -maxrate 2610k -tile-columns 3 -g 240 -threads 8 \
+            -quality good -crf 31 -c:v libvpx-vp9 -c:a libopus \
+            -pix_fmt yuv420p10le \
+            -pass 2 -speed 4 -y $VIDEO_OUT
+          
+      - uses: actions/cache@v2
+        name: Push out video to cache
+        id: fetch-cache
+        with:
+          path: './out'
+          key: ${{ needs.setup-matrix.outputs.hash }}-out
+          
+  reconstruct-video:
+    runs-on: ubuntu-latest
+    needs: transcode-video
+      
+    steps:
+      - uses: actions/cache@v2
+        name: Fetch ffmpeg
+        id: fetch-ffmpeg
+        with:
+          path: './ffmpeg'
+          key: 'ffmpeg'
+          
+      - name: Cache ffmpeg
+        if: steps.fetch-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          url=`
+              curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
+              | grep "linux64-gpl.tar.xz" \
+              | cut -d : -f 2,3 \
+              | cut -d , -f 2 \
+              | tr -d \" 
+          `
+          wget -O ffmpeg.tar.xz $url 
+          tar -xvf ffmpeg.tar.xz
+          mv ffmpeg-* ffmpeg
+          
+      - uses: actions/cache@v2
+        name: Pull out video from cache
+        id: fetch-cache
+        with:
+          path: './out'
+          key: ${{ needs.transcode-video.needs.setup-matrix.outputs.hash }}-out
+      
+      - name: Join Segments
+        run: |
+          find ./out/*.webm | sed 's:\ :\\\ :g'| sed 's/^/file /' > fl.txt 
+          ./ffmpeg/bin/ffmpeg -f concat -i fl.txt -c copy output.webm
+          rm fl.txt
+          
+      - name: Generate DASH Playlist
+        run: |
+          VIDEO_IN=output.mkv
+          V_SIZE_1=640x360
+          V_SIZE_2=768x432
+          V_SIZE_3=1280x720
+          V_SIZE_4=1920x1080
+
+          mkdir tsout
+          touch ./tsout/master.mpd
+
+          ffmpeg -i $VIDEO_IN -y -c:v copy \
+              -map v:0 -s:0 $V_SIZE_1  \
+              -map v:0 -s:1 $V_SIZE_2  \
+              -map v:0 -s:2 $V_SIZE_3  \
+              -map v:0 -s:3 $V_SIZE_4  \
+              -map 0:a \
+              -init_seg_name init\$RepresentationID\$.\$ext\$ -media_seg_name chunk\$RepresentationID\$-\$Number%05d\$.\$ext\$ \
+              -use_template 1 -use_timeline 1  \
+              -seg_duration 4 -adaptation_sets "id=0,streams=v id=1,streams=a" \
+              -f dash tsout/master.mpd
+
+      - name: Upload to Web3
+        run: |
+          touch index.mjs
+          cat >./index.mjs <<'EOL'
+          import { Web3Storage, getFilesFromPath } from 'web3.storage'
+
+          const apiToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkaWQ6ZXRocjoweDYwMUY3Q2U2NjYyNzY1NUMyZTA0MUNkMjlhY0EwQThiNTIwMGZFNjAiLCJpc3MiOiJ3ZWIzLXN0b3JhZ2UiLCJpYXQiOjE2MzgwMDg2MTU2NjIsIm5hbWUiOiJ5dWtpLXRlc3QifQ.4j-EN3A9KxUgmt7aDgMX-ehaFLtA6D4mYofVA3CUenU'
+          const client = new Web3Storage({ token: apiToken })
+
+          async function getFiles(path) {
+          const files = await getFilesFromPath(path)
+          console.log(`read ${files.length} file(s) from ${path}`)
+          return files
+          }
+
+          console.log("Uploading files")
+          let count = 0
+          const rootCid = await client.put(await getFiles('./tsout'),
+          {
+              name: "${{ needs.transcode-video.needs.setup-matrix.outputs.hash }}", maxRetries: 3, onStoredChunk: (chunk) => {
+              count += chunk
+              console.log(`Uploaded ${count/1024/1024} MB`)
+              }
+          })
+          console.log(`Complete. Root CID: ${rootCid}`)
+          console.log(`Total size: ${Math.round(count/1024/1024)} MB`)
+          console.log(`URL: https://${rootCid}.ipfs.dweb.link/tsout/master.mpd`)
+          EOL
+
+          node index.mjs
+          
+
+
