@@ -120,7 +120,7 @@ jobs:
 
       - name: Check matrix definition
         run: |
-          matrix='${{ set-matrix.matrix.outputs.matrix }}'
+          matrix='${{ needs.setup-matrix.matrix.outputs.matrix }}'
           echo $matrix
           echo $matrix | jq .
           echo $matrix | json2yaml
