@@ -88,7 +88,7 @@ jobs:
         run: |
           mkdir ./pre
           DURATION=$(./ffmpeg/bin/ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
-          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 30.0")
+          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 128.0")
 
           echo "Duration: $DURATION"
           echo "Size: $SEGMENT_SIZE"
@@ -116,7 +116,7 @@ jobs:
         with:
           path: |
             ./pre
-          key: ${{ steps.download.outputs.hash }}-v2
+          key: ${{ steps.download.outputs.hash }}-v3
 
 
   check-matrix:
@@ -144,7 +144,7 @@ jobs:
         id: fetch-cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v2
+          key: ${{ needs.setup-matrix.outputs.hash }}-v3
 
       - name: Check Cache
         if: steps.fetch-cache.outputs.cache-hit == 'true'
@@ -193,7 +193,7 @@ jobs:
         name: Fetch video from cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v2
+          key: ${{ needs.setup-matrix.outputs.hash }}-v3
       
       - name: Transcode Segment
         run: |
@@ -219,7 +219,7 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v2-out-${{ matrix.segments }}
+          key: ${{ needs.setup-matrix.outputs.hash }}-v3-out-${{ matrix.segments }}
           
   reconstruct-video:
     runs-on: ubuntu-latest
@@ -254,15 +254,15 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v2-out-xxx
+          key: ${{ needs.setup-matrix.outputs.hash }}-v3-out-xxx
           restore-keys: |
-            ${{ needs.setup-matrix.outputs.hash }}-v2-out-
+            ${{ needs.setup-matrix.outputs.hash }}-v3-out-
       
       - name: Join Segments
         run: |
-          find ./out/*.webm | sed 's:\ :\\\ :g'| sed 's/^/file /' > fl.txt 
-          ./ffmpeg/bin/ffmpeg -f concat -i fl.txt -c copy output.webm
-          rm fl.txt
+          ls ./out > fl.txt 
+          cat fl.txt
+          ./ffmpeg/bin/ffmpeg -f concat -safe 0 -i fl.txt -c copy output.webm
           
       - name: Generate DASH Playlist
         run: |
