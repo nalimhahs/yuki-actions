@@ -116,7 +116,7 @@ jobs:
         with:
           path: |
             ./pre
-          key: ${{ steps.download.outputs.hash }}
+          key: ${{ steps.download.outputs.hash }}-v1
 
 
   check-matrix:
@@ -144,7 +144,7 @@ jobs:
         id: fetch-cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}
+          key: ${{ needs.setup-matrix.outputs.hash }}-v1
 
       - name: Check Cache
         if: steps.fetch-cache.outputs.cache-hit == 'true'
@@ -188,6 +188,12 @@ jobs:
           wget -O ffmpeg.tar.xz $url 
           tar -xvf ffmpeg.tar.xz
           mv ffmpeg-* ffmpeg
+          
+      - uses: actions/cache@v2
+        name: Fetch video from cache
+        with:
+          path: './pre'
+          key: ${{ needs.setup-matrix.outputs.hash }}-v1
       
       - name: Transcode Segment
         run: |
@@ -213,7 +219,7 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-out
+          key: ${{ needs.setup-matrix.outputs.hash }}-v1-out
           
   reconstruct-video:
     runs-on: ubuntu-latest
@@ -246,7 +252,7 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.transcode-video.needs.setup-matrix.outputs.hash }}-out
+          key: ${{ needs.transcode-video.needs.setup-matrix.outputs.hash }}-v1-out
       
       - name: Join Segments
         run: |
@@ -265,7 +271,7 @@ jobs:
           mkdir tsout
           touch ./tsout/master.mpd
 
-          ffmpeg -i $VIDEO_IN -y -c:v copy \
+          ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -y -c:v copy \
               -map v:0 -s:0 $V_SIZE_1  \
               -map v:0 -s:1 $V_SIZE_2  \
               -map v:0 -s:2 $V_SIZE_3  \
