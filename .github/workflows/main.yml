@@ -18,15 +18,16 @@ jobs:
 
       - name: Fetch ffmpeg
         run: |
-          curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
-          | grep "linux64-gpl.tar.xz" \
-          | cut -d : -f 2,3 \
-          | tr -d \" \
-          | wget -qi -
-
-          mkdir ./ffmpeg
-          tar -xvf ffmpeg*.tar.xz
-          mv ffmpeg*/* ./ffmpeg
+          url=`
+              curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
+              | grep "linux64-gpl.tar.xz" \
+              | cut -d : -f 2,3 \
+              | cut -d , -f 2 \
+              | tr -d \" 
+              | tr -d ' '
+          `
+          wget -O ffmpeg.tar.xz $url 
+          tar -xvf ffmpeg.tar.xz
 
       - name: Download
         id: download
