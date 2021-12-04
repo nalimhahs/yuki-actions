@@ -13,10 +13,18 @@ jobs:
     steps:
       - name: Setup Dependencies
         run: |
-          pip3 install xdcc-dl pika psutil
-          sudo apt install wget
-
-      - name: Fetch ffmpeg
+          pip3 install xdcc-dl pika
+          
+      - uses: actions/cache@v2
+        name: Fetch ffmpeg
+        id: fetch-ffmpeg
+        with:
+          path: './ffmpeg'
+          key: 'ffmpeg'
+          
+      - name: Cache ffmpeg
+        if: steps.fetch-ffmpeg.outputs.cache-hit != 'true'
+        shell: python
         run: |
           url=`
               curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
@@ -29,7 +37,7 @@ jobs:
           tar -xvf ffmpeg.tar.xz
           mv ffmpeg-* ffmpeg
 
-      - name: Download
+      - name: Download Video
         id: download
         env:
           RABBITMQ_URL: ${{ secrets.RABBITMQ_URL }}
@@ -140,7 +148,7 @@ jobs:
           key: ${{ needs.setup-matrix.outputs.hash }}
 
       - name: Check Cache
-        if: steps.fetch-cache.outputs.cache-hit != 'true'
+        if: steps.fetch-cache.outputs.cache-hit == 'true'
         shell: python
         run: |
           from os import listdir
