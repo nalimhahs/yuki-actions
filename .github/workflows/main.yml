@@ -88,7 +88,7 @@ jobs:
         run: |
           mkdir ./pre
           DURATION=$(./ffmpeg/bin/ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
-          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 10.0")
+          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 30.0")
 
           echo "Duration: $DURATION"
           echo "Size: $SEGMENT_SIZE"
@@ -219,11 +219,13 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v1-out
+          key: ${{ needs.setup-matrix.outputs.hash }}-v1-out-${{ matrix.segments }}
           
   reconstruct-video:
     runs-on: ubuntu-latest
-    needs: transcode-video
+    needs: 
+    - transcode-video
+    - setup-matrix
       
     steps:
       - uses: actions/cache@v2
@@ -252,7 +254,9 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.transcode-video.needs.setup-matrix.outputs.hash }}-v1-out
+          key: ${{ needs.setup-matrix.outputs.hash }}-v1-out-xxx
+          restore-keys: |
+            ${{ needs.setup-matrix.outputs.hash }}-v1-out-
       
       - name: Join Segments
         run: |
