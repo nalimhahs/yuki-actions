@@ -119,15 +119,28 @@ jobs:
       - name: Install json2yaml
         run: |
           sudo npm install -g json2yaml
+      
+      - name: Check Hash
+        run: |
+          hash='${{ needs.setup-matrix.outputs.hash }}'
+          echo $hash
 
       - name: Check matrix definition
         run: |
-          matrix='${{ needs.setup-matrix.matrix.outputs.matrix }}'
+          matrix='${{ needs.setup-matrix.outputs.matrix }}'
           echo $matrix
           echo $matrix | jq .
           echo $matrix | json2yaml
-      
+          
+      - uses: actions/cache@v2
+        name: Fetch Cache
+        id: fetch-cache
+        with:
+          path: './pre'
+          key: ${{ needs.setup-matrix.outputs.hash }}
+
       - name: Check Cache
+        if: steps.fetch-cache.outputs.cache-hit != 'true'
         shell: python
         run: |
           from os import listdir
