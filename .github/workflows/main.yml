@@ -1,19 +1,34 @@
-name: Video Delivery
+name: Video Transcode Workflow
 on:
   push:
   pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-20.04
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      hash: ${{ steps.download.outputs.hash }}
     steps:
-      - name: Dependencies
+      - name: Setup Dependencies
         run: |
           pip3 install xdcc-dl pika psutil
-          sudo apt-get -y install ffmpeg 
-          npm i web3.storage axios
-      - name: Download 
+
+      - name: Fetch ffmpeg
+        run: |
+          curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
+          | grep "linux64-gpl.tar.xz" \
+          | cut -d : -f 2,3 \
+          | tr -d \" \
+          | wget -qi -
+
+          mkdir ./ffmpeg
+          tar -xvf ffmpeg*.tar.xz
+          mv ffmpeg*/* ./ffmpeg
+
+      - name: Download
+        id: download
         env:
           RABBITMQ_URL: ${{ secrets.RABBITMQ_URL }}
         shell: python
@@ -22,6 +37,7 @@ jobs:
           import sys
           import json
           import pika
+          import hashlib
           from xdcc_dl.xdcc import download_packs
           from xdcc_dl.entities import XDCCPack, IrcServer
 
@@ -50,297 +66,73 @@ jobs:
           else:
               print("No message received")
               sys.exit(1)
-              
-      - name: Transcode 
+
+          filename = "output.mkv"
+          with open(filename,"rb") as f:
+              bytes = f.read() 
+              readable_hash = hashlib.sha256(bytes).hexdigest();
+              print(readable_hash)
+
+          print("::set-output name=hash::" + readable_hash)
+
+      - name: Segment Video
+        run: |
+          mkdir ./pre
+          DURATION=$(ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
+          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 128.0")
+
+          echo "Duration: $DURATION"
+          echo "Size: $SEGMENT_SIZE"
+
+          ./ffmpeg/bin/ffmpeg -i output.mkv \
+              -vcodec copy -f segment -segment_time $SEGMENT_SIZE \
+              ./pre/pre_%02d.mkv
+
+      - name: Setup Matrix
+        id: set-matrix
         shell: python
         run: |
-          from os import getcwd, listdir, mkdir
+          from os import listdir
           from os.path import isfile, join
-          from datetime import datetime, timedelta
-          import time
-          import re
-          import subprocess
           import json
-          import random
-          import psutil
 
-          RENDITIONS_LIST = (
-              [1920, 1080, 8000000, 192000],
-              [1280, 720, 5000000, 192000],
-              [842, 480, 2500000, 128000],
-              [640, 360, 1000000, 128000]
-          )
+          path = './pre'
+          files = [f for f in listdir(path) if isfile(join(path, f))]
+          segments = { 'segments': files }
 
-          default_params = {
-              "hls_dash_params": {
-                  "duration": 2,
-                  "segment_num": 0
-              },
-              "tc_params": {
-                  "renditions": RENDITIONS_LIST,
-                  "codec_type": "AVC",
-                  "gop_size": "100",
-                  "framerate": "30",
-                  "bframe": "2",
-                  "preset": "medium",
-                  "profile": "578",
-                  "level": "30",
-                  "refs": "2",
-                  "forced_idr": "1",
-                  "target_type": "mp4"
-              }
-          }
+          print("::set-output name=matrix::" + json.dumps(segments))
 
-          codec_setting = {
-              "sw": {
-                  "AVC": "libx264",
-                  "HEVC": "libsvt_hevc"
-              },
-              "vaapi": {
-                  "AVC": "h264_vaapi",
-                  "HEVC": "hevc_vaapi"
-              },
-              "qsv": {
-                  "AVC": "h264_qsv",
-                  "HEVC": "hevc_qsv"
-              }
-          }
+      - name: Upload to Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ./pre
+          key: ${{ steps.download.outputs.hash }}
 
 
-          class FFMpegCmd:
-              def __init__(self, in_params, out_params, streaming_type, params, loop=0, acc_type="sw", device=None):
-                  self._in_file = in_params
-                  self._target = out_params
-                  self._tc_params = params if params else default_params["tc_params"]
-                  self._hls_dash_params = params["hls_dash_params"] if "hls_dash_params" in params.keys(
-                  ) else default_params["hls_dash_params"]
-                  self._acc_type = acc_type
-
-                  self._segment_num = self._hls_dash_params["segment_num"]
-                  self._duration = self._hls_dash_params["duration"]
-
-                  self._stream_info = None
-                  self._streaming_type = streaming_type
-
-                  self._renditions = RENDITIONS_LIST
-
-                  self._codec_type = "AVC"
-
-                  self._cmd_base = ["ffmpeg", "-hide_banner", "-y", "-tune", "animation"]
-                  if loop:
-                      self._cmd_base = self._cmd_base + ["-stream_loop", "-1"]
-
-                  self._device = device
-
-                  self._cmd_base = self._cmd_base + ["-i", self._in_file]
-
-                  self._keyframe_interval = 0
-                  self._frame_height = 0
-                  self._clip_v_duration = 0
-                  self._clip_a_duration = 0
-
-                  # try to create a new segment every X seconds
-                  self._segment_target_duration = self._duration
-                  self._max_bitrate_ratio = 1.07          # maximum accepted bitrate fluctuations
-                  # maximum buffer size between bitrate conformance checks
-                  self._rate_monitor_buffer_ratio = 1.5
-
-                  self._default_threshold = 4
-                  self.stream_info(self._in_file)
-                  self._codec = self._get_codec()
-                  # hls and dash
-                  self._cmd_static = ["-c:v", self._codec, "-profile:v",
-                                      "main", "-sc_threshold", "0", "-strict", "-2", "-preset", "slow", "-crf", "18"]
-                  if self._acc_type != "sw":
-                      self._cmd_static = ["-profile:v", "main", "-c:v", self._codec]
-                  self._cmd_static += ["-g", str(self._keyframe_interval)]
-                  self._cmd_base += self._cmd_static
-
-              def _to_kps(self, bitrate):
-                  return str(int(bitrate/1000))+"k"
-
-              def _get_codec(self):
-                  return codec_setting[self._acc_type][self._codec_type]
-
-              def stream_info(self, in_file):
-                  ffprobe_cmd = ["ffprobe", "-v", "quiet",
-                                 "-print_format", "json", "-show_streams", in_file]
-                  p = subprocess.Popen(ffprobe_cmd, stdout=subprocess.PIPE)
-                  p.wait()
-                  clip_info = json.loads(p.stdout.read().decode("utf-8"))
-
-                  for item in clip_info["streams"]:
-                      try:
-                          if item["codec_type"] == "video":
-                              self._keyframe_interval = int(
-                                  eval(item["avg_frame_rate"])+0.5)
-                              self._frame_height = item["height"]
-                              self._clip_v_duration = eval(item["duration"])
-                          if item["codec_type"] == "audio":
-                              self._clip_a_duration = eval(item["duration"])
-                          break
-                      except:
-                          pass
-                  if self._segment_num != 0:
-                      segment_duration = (int)(
-                          (self._clip_v_duration+2.0)/self._segment_num)
-                      if segment_duration < self._segment_target_duration:
-                          self._segment_target_duration = segment_duration
-
-              def _hls(self):
-                  cmd = ["-filter_complex"]
-                  splt = "[0:v]split=" + str(len(self._renditions))
-                  for i in range(1, len(self._renditions) + 1):
-                      splt += "[v" + str(i) + "]"
-                  splt += "; "
-                  for i in range(1, len(self._renditions) + 1):
-                      splt += "[v" + str(i) + "]subtitles=output.mkv, scale=w=" + \
-                          str(self._renditions[i-1][0]) + ":h=" + \
-                          str(self._renditions[i-1][1]) + "[v" + str(i) + "out];"
-
-                  cmd += [splt[:-1]]
-
-                  for i in range(len(self._renditions)):
-                      temp = ["-map", "[v" + str(i+1) + "out]"]
-                      temp += ["-c:v:" + str(i), "libx264", "-x264-params", "\"nal-hrd=cbr:force-cfr=1\"",
-                               "-b:v:" + str(i), self._to_kps(self._renditions[i-1][2]),
-                               "-maxrate:v:" +
-                               str(i), self._to_kps(self._renditions[i-1][2]),
-                               "-minrate:v:" +
-                               str(i), self._to_kps(self._renditions[i-1][2]),
-                               "-bufsize:v:" +
-                               str(i), self._to_kps(self._renditions[i-1][2]*2),
-                               "-keyint_min", "48"]
-                      cmd += temp
-
-                  for i in range(len(self._renditions)):
-                      temp = ["-map", "a:0"]
-                      temp += ["-c:a:" + str(i), "aac", "-b:a:" + str(i),
-                               self._to_kps(self._renditions[i-1][3]), "-ac", "2"]
-                      cmd += temp
-
-                  cmd += ["-f", "hls"]
-                  cmd += ["-hls_time", str(self._segment_target_duration)]
-                  cmd += ["-hls_playlist_type", "vod"]
-                  cmd += ["-hls_flags", "independent_segments"]
-                  cmd += ["-hls_segment_filename", "tsout/%v_data%02d.ts"]
-                  cmd += ["-hls_segment_type", "mpegts"]
-                  cmd += ["-master_pl_name", "master.m3u8"]
-                  cmd += ["-var_stream_map"]
-
-                  temp = ""
-                  for i in range(len(self._renditions)):
-                      temp += "v:%d,a:%d " % (i, i)
-                  cmd += [temp[:-1]]
-                  cmd += ["tsout/stream_%v.m3u8"]
-
-                  return cmd
-
-              def cmd(self):
-                  cmd = []
-                  if self._streaming_type == "hls":
-                      cmd = self._cmd_base + self._hls()
-                  return cmd
-
-
-          fps_regex = re.compile(
-              r"\s*frame=\s*(?P<frame_count>\d+)\s*fps=\s*(?P<fps>\d+\.?\d*).*"
-              r"time=(?P<duration>\d+:\d+:\d+\.\d+).*speed=\s*(?P<speed>\d+\.\d+)x")
-
-
-          def get_fps(next_line, start_time):
-              matched = fps_regex.match(next_line)
-              if (matched):
-                  fps = float(matched.group('fps'))
-                  speed = float(matched.group("speed"))
-                  frame_count = int(matched.group("frame_count"))
-                  time_value = datetime.strptime(
-                      matched.group("duration"), "%H:%M:%S.%f")
-                  duration = timedelta(
-                      hours=time_value.hour,
-                      minutes=time_value.minute,
-                      seconds=time_value.second,
-                      microseconds=time_value.microsecond)
-                  if fps < 0:
-                      fps = (frame_count / (duration.total_seconds())) * speed
-                  now = time.time()
-                  return {"fps": round(fps, 1), "speed": round(speed, 3), "frames": frame_count, "start": round(start_time, 3), "duration": round(now-start_time, 3), "end": round(now, 3), "status": "active"}
-              return {}
-
-
-          def execute(idx, name, cmd):
-              p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, bufsize=1, universal_newlines=True)
-              p.poll()
-              start_time = time.time()
-              sinfo = {"id": str(idx), "stream": name}
-              p1 = psutil.Process(p.pid)
-              print(p1)
-              while p.returncode is None:
-                  next_line = p.stderr.readline()
-                  r = get_fps(next_line, start_time)
-                  if r:
-                      sinfo.update({"cpu": round(p1.cpu_percent(), 2),
-                                   "mem": round(p1.memory_percent(), 2)})
-                      sinfo.update(r)
-                      print(sinfo, flush=True)
-                  p.poll()
-              try:
-                  if p.returncode:
-                      sinfo.update({"status": "aborted"})
-                  else:
-                      sinfo.update({"status": "completed"})
-                  print(sinfo, flush=True)
-              except Exception as e:
-                  print("Exception: {}".format(e))
-              return p.returncode
-
-
-          cwd = getcwd()
-          onlyfiles = [f for f in listdir(cwd) if isfile(join(cwd, f))]
-          out_path = join(cwd, 'tsout')
-
-          try:
-              mkdir(out_path)
-          except FileExistsError:
-              pass
-
-          for f in onlyfiles:
-              if f.endswith(".mp4") or f.endswith(".mkv"):
-                  cmd = FFMpegCmd(f, out_path, "hls", default_params).cmd()
-                  break
-
-          if cmd:
-              r = execute(int(random.random()*10000), "tsout", cmd)
-
-      - name: Upload
+  check-matrix:
+    runs-on: ubuntu-latest
+    needs: setup-matrix
+    steps:
+      - name: Install json2yaml
         run: |
-          touch index.mjs
-          cat >./index.mjs <<'EOL'
-          import { Web3Storage, getFilesFromPath } from 'web3.storage'
+          sudo npm install -g json2yaml
 
-          const apiToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkaWQ6ZXRocjoweDYwMUY3Q2U2NjYyNzY1NUMyZTA0MUNkMjlhY0EwQThiNTIwMGZFNjAiLCJpc3MiOiJ3ZWIzLXN0b3JhZ2UiLCJpYXQiOjE2MzgwMDg2MTU2NjIsIm5hbWUiOiJ5dWtpLXRlc3QifQ.4j-EN3A9KxUgmt7aDgMX-ehaFLtA6D4mYofVA3CUenU'
-          const client = new Web3Storage({ token: apiToken })
-
-          async function getFiles(path) {
-          const files = await getFilesFromPath(path)
-          console.log(`read ${files.length} file(s) from ${path}`)
-          return files
-          }
-
-          console.log("Uploading files")
-          let count = 0
-          const rootCid = await client.put(await getFiles('./tsout'),
-          {
-              name: "", maxRetries: 3, onStoredChunk: (chunk) => {
-              count += chunk
-              console.log(`Uploaded ${count/1024/1024} MB`)
-              }
-          })
-          console.log(`Complete. Root CID: ${rootCid}`)
-          console.log(`Total size: ${count/1024/1024} MB`)
-          console.log(`URL: https://${rootCid}.ipfs.dweb.link/tsout/master.m3u8`)
-          EOL
-
-          node index.mjs
+      - name: Check matrix definition
+        run: |
+          matrix='${{ setup-matrix.matrix.outputs.matrix }}'
+          echo $matrix
+          echo $matrix | jq .
+          echo $matrix | json2yaml
       
+      - name: Check Cache
+        shell: python
+        run: |
+          from os import listdir
+          from os.path import isfile, join
+          import json
+
+          path = './pre'
+          files = [f for f in listdir(path) if isfile(join(path, f))]
+          segments = { 'segments': files }
+          print(segments)
