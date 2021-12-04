@@ -88,7 +88,7 @@ jobs:
         run: |
           mkdir ./pre
           DURATION=$(./ffmpeg/bin/ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
-          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 128.0")
+          SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 10.0")
 
           echo "Duration: $DURATION"
           echo "Size: $SEGMENT_SIZE"
@@ -191,7 +191,8 @@ jobs:
       
       - name: Transcode Segment
         run: |
-          VIDEO_IN=./pre/${{ matrix.segment }}
+          echo "Segment Name: ${{ matrix.segments }}"
+          VIDEO_IN=./pre/${{ matrix.segments }}
           VIDEO_OUT=./out/`echo "$VIDEO_IN" | sed -r "s/.+\/(.+)\..+/\1/"`.webm
 
           mkdir ./out
