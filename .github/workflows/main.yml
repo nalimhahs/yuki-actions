@@ -17,11 +17,14 @@ jobs:
 
       - name: Fetch ffmpeg
         run: |
-          curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest \
-          | grep "linux64-gpl.tar.xz" \
-          | cut -d : -f 2,3 \
-          | tr -d \" \
-          | wget -qi -
+          curl -s https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest > temp
+          cat temp
+          cat temp | grep "linux64-gpl.tar.xz" > temp2
+          cat temp2
+          cat temp2 | cut -d : -f 2,3 > temp3
+          cat temp3
+          cat temp3 | tr -d \" > temp4
+          cat temp4 | wget -qi - 
 
           mkdir ./ffmpeg
           tar -xvf ffmpeg*.tar.xz
