@@ -27,6 +27,7 @@ jobs:
           `
           wget -O ffmpeg.tar.xz $url 
           tar -xvf ffmpeg.tar.xz
+          mv ffmpeg-* ffmpeg
 
       - name: Download
         id: download
@@ -79,7 +80,7 @@ jobs:
       - name: Segment Video
         run: |
           mkdir ./pre
-          DURATION=$(ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
+          DURATION=$(./ffmpeg/bin/ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
           SEGMENT_SIZE=$(bc <<< "scale=0; $DURATION / 128.0")
 
           echo "Duration: $DURATION"
