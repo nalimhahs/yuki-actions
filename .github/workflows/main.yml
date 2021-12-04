@@ -24,7 +24,6 @@ jobs:
               | cut -d : -f 2,3 \
               | cut -d , -f 2 \
               | tr -d \" 
-              | tr -d ' '
           `
           wget -O ffmpeg.tar.xz $url 
           tar -xvf ffmpeg.tar.xz
