@@ -216,11 +216,10 @@ jobs:
 
           mkdir ./out
 
-          # docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
-          # -i "$VIDEO_IN" -e aom \
-          # --target-quality 95 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT" -q
-          # cat log.log
-          cp "$VIDEO_IN" "$VIDEO_OUT"
+          docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
+          -i "$VIDEO_IN" -e aom \
+          --target-quality 95 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT" -q
+          cat log.log
 
       - uses: actions/upload-artifact@v2
         name: Push out video to artifact
@@ -282,10 +281,10 @@ jobs:
           touch ./tsout/master.mpd
 
           ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -y -c:v copy \
-              -map v:0 -s:0 $V_SIZE_1  \
-              -map v:0 -s:1 $V_SIZE_2  \
-              -map v:0 -s:2 $V_SIZE_3  \
-              -map v:0 -s:3 $V_SIZE_4  \
+              -map v:0 -s:0 $V_SIZE_1 -b:v:0 500k \
+              -map v:0 -s:1 $V_SIZE_2 -b:v:1 2M \
+              -map v:0 -s:2 $V_SIZE_3 -b:v:2 5M \
+              -map v:0 -s:3 $V_SIZE_4 -b:v:3 8M \
               -map 0:a \
               -init_seg_name init\$RepresentationID\$.\$ext\$ -media_seg_name chunk\$RepresentationID\$-\$Number%05d\$.\$ext\$ \
               -use_template 1 -use_timeline 1  \
@@ -324,5 +323,3 @@ jobs:
 
           node index.mjs
           
-
-
