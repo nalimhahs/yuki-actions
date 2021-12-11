@@ -215,19 +215,20 @@ jobs:
 
           mkdir ./out
 
-          docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
-          -i "$VIDEO_IN" -e aom -v " --preset 4 --keyint 240 --rc 0 --crf 0 " \
-          --target-quality 95 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT" -q
+          # docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
+          # -i "$VIDEO_IN" -e aom \
+          # --target-quality 95 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT" -q
+
+          cp "$VIDEO_IN" "$VIDEO_OUT"
 
           cat log.log
 
-      - uses: actions/cache@v2
-        name: Push out video to cache
-        id: fetch-cache
+      - uses: actions/upload-artifact@v2
+        name: Push out video to artifact
         with:
-          path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-${{ matrix.segments }}
-          
+          name: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-${{ matrix.segments }}
+          path: './out/*.mkv'
+        
   reconstruct-video:
     runs-on: ubuntu-latest
     needs: 
@@ -255,19 +256,16 @@ jobs:
           wget -O ffmpeg.tar.xz $url 
           tar -xvf ffmpeg.tar.xz
           mv ffmpeg-* ffmpeg
-          
-      - uses: actions/cache@v2
-        name: Pull out video from cache
-        id: fetch-cache
+          mkdir ./out
+
+      - uses: actions/download-artifact@v2
+        name: Fetch Artifacts
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-xxx
-          restore-keys: |
-            ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-
       
       - name: Join Segments
         run: |
-          for f in `ls ./out/*.mkv | sort -n`
+          for f in `ls ./out/*/*.mkv | sort -n`
             do echo "file '$f'" >> mylist.txt 
           done
           cat mylist.txt  
@@ -297,6 +295,7 @@ jobs:
 
       - name: Upload to Web3
         run: |
+          npm install web3.storage
           touch index.mjs
           cat >./index.mjs <<'EOL'
           import { Web3Storage, getFilesFromPath } from 'web3.storage'
