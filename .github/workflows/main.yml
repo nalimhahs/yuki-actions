@@ -92,7 +92,7 @@ jobs:
           print("::set-output name=cache_version::" + CACHE_VERSION)
 
       - name: Segment Video
-        if: ${{ steps.download.outputs.valid == "true" }}
+        if: ${{ steps.download.outputs.valid == 'true' }}
         run: |
           mkdir ./pre
           DURATION=$(./ffmpeg/bin/ffprobe -i output.mkv -show_format -v quiet | sed -n 's/duration=//p')
@@ -107,7 +107,7 @@ jobs:
 
       - name: Setup Matrix
         id: set-matrix
-        if: ${{ steps.download.outputs.valid == "true" }}
+        if: ${{ steps.download.outputs.valid == 'true' }}
         shell: python
         run: |
           from os import listdir
