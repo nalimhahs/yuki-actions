@@ -130,7 +130,7 @@ jobs:
 
 
   check-matrix:
-    if: ${{ needs.setup-matrix.outputs.hash == 'true' }}
+    if: ${{ needs.setup-matrix.outputs.valid == 'true' }}
     runs-on: ubuntu-latest
     needs: setup-matrix
     steps:
@@ -173,7 +173,7 @@ jobs:
   transcode-video:
     runs-on: ubuntu-latest
     needs: setup-matrix
-    if: ${{ needs.setup-matrix.outputs.hash == 'true' }}
+    if: ${{ needs.setup-matrix.outputs.valid == 'true' }}
 
     strategy:
       fail-fast: false
@@ -231,7 +231,6 @@ jobs:
     needs: 
     - transcode-video
     - setup-matrix
-    if: ${{ needs.setup-matrix.outputs.hash == 'true' }}
 
     steps:
       - uses: actions/cache@v2
