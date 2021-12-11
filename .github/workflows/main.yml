@@ -129,6 +129,18 @@ jobs:
             ./pre
           key: ${{ steps.download.outputs.hash }}-${{ steps.download.outputs.cache_version }}
 
+      - uses: actions/cache@v2
+        name: Cache Docker
+        id: pull-docker-image
+        with:
+          path: '/var/lib/docker/'
+          key: docker
+
+      - name: Pull docker base
+        if: steps.pull-docker-image.outputs.cache-hit != 'true'
+        run:
+          docker pull masterofzen/av1an:latest
+
 
   check-matrix:
     if: ${{ needs.setup-matrix.outputs.valid == 'true' }}
@@ -223,8 +235,8 @@ jobs:
           mkdir ./out
 
           docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
-          -i "$VIDEO_IN" -e vpx \
-          --target-quality 98 --pix-format yuv420p10le -l "log" -o "$VIDEO_OUT"
+          -i "$VIDEO_IN" -e vpx -v " --codec=vp9 -b 10 --profile=2 --threads=4 --cpu-used=0 --end-usage=q --cq-level=19 --best --row-mt=1 " \
+          --target-quality 96 --pix-format yuv420p10le -l "log" -o "$VIDEO_OUT"
           cat log.log
 
       - uses: actions/upload-artifact@v2
@@ -287,10 +299,10 @@ jobs:
           touch ./tsout/master.mpd
 
           ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -y -c:v copy \
-              -map v:0 -s:0 $V_SIZE_1 -b:v:0 500k \
-              -map v:0 -s:1 $V_SIZE_2 -b:v:1 2M \
-              -map v:0 -s:2 $V_SIZE_3 -b:v:2 5M \
-              -map v:0 -s:3 $V_SIZE_4 -b:v:3 8M \
+              -map v:0 -s:0 "$V_SIZE_1" -b:v:0 500k \
+              -map v:0 -s:1 "$V_SIZE_2" -b:v:1 2M \
+              -map v:0 -s:2 "$V_SIZE_3" -b:v:2 5M \
+              -map v:0 -s:3 "$V_SIZE_4" -b:v:3 8M \
               -map 0:a \
               -init_seg_name init\$RepresentationID\$.\$ext\$ -media_seg_name chunk\$RepresentationID\$-\$Number%05d\$.\$ext\$ \
               -use_template 1 -use_timeline 1  \
