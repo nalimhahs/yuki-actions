@@ -10,6 +10,9 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       hash: ${{ steps.download.outputs.hash }}
+      valid: ${{ steps.download.outputs.valid }}
+      cache_version: ${{ steps.download.outputs.cache_version }}
+
     steps:
       - name: Setup Dependencies
         run: |
@@ -50,6 +53,8 @@ jobs:
           from xdcc_dl.xdcc import download_packs
           from xdcc_dl.entities import XDCCPack, IrcServer
 
+          CACHE_VERSION = "v4"
+
           params = pika.URLParameters(os.environ['RABBITMQ_URL'])
           connection = pika.BlockingConnection(params)
 
@@ -72,17 +77,19 @@ jobs:
               download_packs([pack])
               print(" [x] Download Done ")
               print(" [x] Done ")
+              filename = "output.mkv"
+              with open(filename,"rb") as f:
+                  bytes = f.read() 
+                  readable_hash = hashlib.sha256(bytes).hexdigest();
+                  print(readable_hash)
+
+              print("::set-output name=hash::" + readable_hash)
+              print("::set-output name=valid::true")
           else:
               print("No message received")
-              sys.exit(1)
-
-          filename = "output.mkv"
-          with open(filename,"rb") as f:
-              bytes = f.read() 
-              readable_hash = hashlib.sha256(bytes).hexdigest();
-              print(readable_hash)
-
-          print("::set-output name=hash::" + readable_hash)
+              print("::set-output name=valid::false")
+          
+          print("::set-output name=cache_version::" + CACHE_VERSION)
 
       - name: Segment Video
         run: |
@@ -95,7 +102,7 @@ jobs:
 
           ./ffmpeg/bin/ffmpeg -i output.mkv -map 0\
               -vcodec copy -f segment -segment_time $SEGMENT_SIZE \
-              ./pre/pre_%02d.mkv
+              ./pre/pre_%03d.mkv
 
       - name: Setup Matrix
         id: set-matrix
@@ -116,10 +123,11 @@ jobs:
         with:
           path: |
             ./pre
-          key: ${{ steps.download.outputs.hash }}-v3
+          key: ${{ steps.download.outputs.hash }}-${{ steps.download.outputs.cache_version }}
 
 
   check-matrix:
+    if: ${{ needs.setup-matrix.outputs.hash == 'true' }}
     runs-on: ubuntu-latest
     needs: setup-matrix
     steps:
@@ -144,7 +152,7 @@ jobs:
         id: fetch-cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v3
+          key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}
 
       - name: Check Cache
         if: steps.fetch-cache.outputs.cache-hit == 'true'
@@ -162,7 +170,8 @@ jobs:
   transcode-video:
     runs-on: ubuntu-latest
     needs: setup-matrix
-    
+    if: ${{ needs.setup-matrix.outputs.hash == 'true' }}
+
     strategy:
       fail-fast: false
       matrix: ${{fromJson(needs.setup-matrix.outputs.matrix)}}
@@ -193,40 +202,34 @@ jobs:
         name: Fetch video from cache
         with:
           path: './pre'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v3
+          key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}
       
       - name: Transcode Segment
         run: |
           echo "Segment Name: ${{ matrix.segments }}"
           VIDEO_IN=./pre/${{ matrix.segments }}
-          VIDEO_OUT=./out/`echo "$VIDEO_IN" | sed -r "s/.+\/(.+)\..+/\1/"`.webm
+          VIDEO_OUT=./out/`echo "$VIDEO_IN" | sed -r "s/.+\/(.+)\..+/\1/"`.mkv
 
           mkdir ./out
 
-          ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -vf scale=1920x1080,subtitles=$VIDEO_IN -b:v 1800k \
-            -minrate 900k -maxrate 2610k -tile-columns 2 -g 240 -threads 8 \
-            -quality good -crf 31 -c:v libvpx-vp9 -c:a libopus \
-            -pix_fmt yuv420p10le \
-            -pass 1 -speed 4 $VIDEO_OUT && \
-          ./ffmpeg/bin/ffmpeg -i $VIDEO_IN -vf scale=1920x1080 -b:v 1800k \
-            -minrate 900k -maxrate 2610k -tile-columns 3 -g 240 -threads 8 \
-            -quality good -crf 31 -c:v libvpx-vp9 -c:a libopus \
-            -pix_fmt yuv420p10le \
-            -pass 2 -speed 4 -y $VIDEO_OUT
-          
+          docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -it --rm masterofzen/av1an:latest \
+          -i $VIDEO_IN  -e svt-av1 -v " --preset 2 --keyint 240 --rc 0 --crf 0 " \
+          --target-quality 95 --pix-format yuv420p10le -l "log.log" -o $VIDEO_OUT
+
       - uses: actions/cache@v2
         name: Push out video to cache
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v3-out-${{ matrix.segments }}
+          key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-${{ matrix.segments }}
           
   reconstruct-video:
     runs-on: ubuntu-latest
     needs: 
     - transcode-video
     - setup-matrix
-      
+    if: ${{ needs.setup-matrix.outputs.hash == 'true' }}
+
     steps:
       - uses: actions/cache@v2
         name: Fetch ffmpeg
@@ -254,20 +257,21 @@ jobs:
         id: fetch-cache
         with:
           path: './out'
-          key: ${{ needs.setup-matrix.outputs.hash }}-v3-out-xxx
+          key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-xxx
           restore-keys: |
-            ${{ needs.setup-matrix.outputs.hash }}-v3-out-
+            ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}-out-
       
       - name: Join Segments
         run: |
-          for f in ./out/*.webm; do echo "file '$f'" > mylist.txt; done
-          cat mylist.txt
-          ./ffmpeg/bin/ffmpeg -f concat -safe 0 -i mylist.txt -c copy output.webm
-
+          for f in `ls ./out/*.mkv | sort -n`
+            do echo "file '$f'" >> mylist.txt 
+          done
+          cat mylist.txt  
+          ./ffmpeg/bin/ffmpeg -f concat -safe 0 -i mylist.txt -c copy output-re.mkv
           
       - name: Generate DASH Playlist
         run: |
-          VIDEO_IN=output.webm
+          VIDEO_IN=output-re.mkv
           V_SIZE_1=640x360
           V_SIZE_2=768x432
           V_SIZE_3=1280x720
