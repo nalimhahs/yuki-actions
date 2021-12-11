@@ -221,7 +221,7 @@ jobs:
 
           cp "$VIDEO_IN" "$VIDEO_OUT"
 
-          cat log.log
+          # cat log.log
 
       - uses: actions/upload-artifact@v2
         name: Push out video to artifact
