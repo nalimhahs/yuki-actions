@@ -215,10 +215,11 @@ jobs:
 
           mkdir ./out
 
-          docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
-          -i "$VIDEO_IN" -e x264 \
-          --target-quality 10 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT" -q
-          cat log.log
+          # docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
+          # -i "$VIDEO_IN" -e aom \
+          # --target-quality 95 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT" -q
+          # cat log.log
+          cp "$VIDEO_IN" "$VIDEO_OUT"
 
       - uses: actions/upload-artifact@v2
         name: Push out video to artifact
