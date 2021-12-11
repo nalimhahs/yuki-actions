@@ -121,7 +121,7 @@ jobs:
           print("::set-output name=matrix::" + json.dumps(segments))
 
       - name: Upload to Cache
-        if: ${{ steps.download.outputs.valid == "true" }}
+        if: ${{ steps.download.outputs.valid == 'true' }}
         uses: actions/cache@v2
         with:
           path: |
