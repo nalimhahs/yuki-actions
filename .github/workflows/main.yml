@@ -208,6 +208,12 @@ jobs:
           path: './pre'
           key: ${{ needs.setup-matrix.outputs.hash }}-${{ needs.setup-matrix.outputs.cache_version }}
       
+      - uses: actions/cache@v2
+        name: Fetch docker cache
+        with:
+          path: '/var/lib/docker/'
+          key: docker
+      
       - name: Transcode Segment
         run: |
           echo "Segment Name: ${{ matrix.segments }}"
