@@ -217,7 +217,7 @@ jobs:
           mkdir ./out
 
           docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
-          -i "$VIDEO_IN" -e aom \
+          -i "$VIDEO_IN" -e vpx \
           --target-quality 95 --pix-format yuv420p10le -l "log" -o "$VIDEO_OUT"
           cat log.log
 
