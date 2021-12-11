@@ -215,9 +215,9 @@ jobs:
 
           mkdir ./out
 
-          docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -it --rm masterofzen/av1an:latest \
-          -i $VIDEO_IN  -e svt-av1 -v " --preset 2 --keyint 240 --rc 0 --crf 0 " \
-          --target-quality 95 --pix-format yuv420p10le -l "log.log" -o $VIDEO_OUT
+          docker run --privileged -v "$(pwd):/videos" --user $(id -u):$(id -g) -t --rm masterofzen/av1an:latest \
+          -i "$VIDEO_IN"  -e svt-av1 -v " --preset 2 --keyint 240 --rc 0 --crf 0 " \
+          --target-quality 95 --pix-format yuv420p10le -l "log.log" -o "$VIDEO_OUT"
 
       - uses: actions/cache@v2
         name: Push out video to cache
