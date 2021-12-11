@@ -53,7 +53,7 @@ jobs:
           from xdcc_dl.xdcc import download_packs
           from xdcc_dl.entities import XDCCPack, IrcServer
 
-          CACHE_VERSION = "v4"
+          CACHE_VERSION = "v5"
 
           params = pika.URLParameters(os.environ['RABBITMQ_URL'])
           connection = pika.BlockingConnection(params)
@@ -101,8 +101,9 @@ jobs:
           echo "Duration: $DURATION"
           echo "Size: $SEGMENT_SIZE"
 
-          ./ffmpeg/bin/ffmpeg -i output.mkv -map 0\
-              -vcodec copy -f segment -segment_time $SEGMENT_SIZE \
+          ./ffmpeg/bin/ffmpeg -i output.mkv -c copy\
+              -f segment -segment_time $SEGMENT_SIZE \
+              -segment_format mpegts \
               ./pre/pre_%03d.mkv
 
       - name: Setup Matrix
